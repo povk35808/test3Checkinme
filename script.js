@@ -496,7 +496,7 @@ async function fetchAllLeaveForMonth(employeeId) {
         if (startDate >= startMonthDate && startDate <= endMonthDate) {
           const dateStr = getTodayDateString(startDate);
           const formatted = formatDate(startDate);
-          const leaveLabel = `ច្បាប់ ${durationStr} (${reason})`;
+          const leaveLabel = `${reason}`;
 
           if (durationStr === "មួយថ្ងៃ" || durationStr === "មួយយប់") {
             allLeaveRecords.push({
