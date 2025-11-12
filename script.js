@@ -422,6 +422,192 @@ function isInsideArea(lat, lon) {
   return isInside;
 }
 
+// --- *** ថ្មី: Function សម្រាប់ទាញទិន្នន័យច្បាប់ (Leave) ទាំងអស់ក្នុងខែ *** ---
+async function fetchAllLeaveForMonth(employeeId) {
+  if (!dbLeave) return []; // ត្រឡប់អារេទទេ ប្រសិនបើ dbLeave មិនទាន់រួចរាល់
+
+  const leaveCollectionPath =
+    "/artifacts/default-app-id/public/data/leave_requests";
+  const outCollectionPath =
+    "/artifacts/default-app-id/public/data/out_requests";
+
+  // យកថ្ងៃទី 1 និងថ្ងៃចុងក្រោយនៃខែបច្ចុប្បន្ន
+  const { startOfMonth, endOfMonth } = getCurrentMonthRange(); // e.g., "2025-11-01", "2025-11-30"
+  const startMonthDate = new Date(startOfMonth + "T00:00:00");
+  const endMonthDate = new Date(endOfMonth + "T23:59:59");
+
+  let allLeaveRecords = [];
+
+  // 1. ទាញ 'leave_requests' (ច្បាប់វែង, ច្បាប់ឈឺ, ច្បាប់ប្រចាំឆ្នាំ)
+  try {
+    const qLeave = query(
+      collection(dbLeave, leaveCollectionPath),
+      where("userId", "==", employeeId),
+      where("status", "==", "approved")
+    );
+    const leaveSnapshot = await getDocs(qLeave);
+
+    leaveSnapshot.forEach((doc) => {
+      const data = doc.data();
+      const startDate = parseLeaveDate(data.startDate); // ប្រើ Function ដែលមានស្រាប់
+      if (!startDate) return; // បរាជ័យក្នុងការបំប្លែងកាលបរិច្ឆេទ
+
+      const durationStr = data.duration;
+      const reason = data.reason || "(មិនមានមូលហេតុ)";
+      const durationNum = durationMap[durationStr] || parseFloat(durationStr);
+      const isMultiDay = !isNaN(durationNum);
+
+      if (isMultiDay) {
+        // សម្រាប់ច្បាប់ច្រើនថ្ងៃ (e.g., 1.5, 2, 2.5)
+        const daysToSpan = Math.ceil(durationNum);
+        for (let i = 0; i < daysToSpan; i++) {
+          const currentLeaveDate = new Date(startDate);
+          currentLeaveDate.setDate(startDate.getDate() + i);
+
+          // ពិនិត្យមើលថាតើថ្ងៃឈប់សម្រាកនេះ ស្ថិតនៅក្នុងខែបច្ចុប្បន្នឬអត់
+          if (
+            currentLeaveDate >= startMonthDate &&
+            currentLeaveDate <= endMonthDate
+          ) {
+            let leaveType = `ច្បាប់ ${durationStr}`;
+            const isHalfDay = durationNum % 1 !== 0; // ពិនិត្យមើលថាតើជាច្បាប់ .5 (កន្លះថ្ងៃ)
+
+            if (isHalfDay && i === daysToSpan - 1) {
+              // នេះគឺជាថ្ងៃចុងក្រោយនៃច្បាប់ ហើយវាជាកន្លះថ្ងៃ (ព្រឹក)
+              allLeaveRecords.push({
+                date: getTodayDateString(currentLeaveDate), // YYYY-MM-DD
+                formattedDate: formatDate(currentLeaveDate), // DD-Mon-YYYY
+                checkIn: `${leaveType} (${reason})`,
+                checkOut: null, // ត្រូវ Check-out ពេលរសៀល
+              });
+            } else {
+              // នេះគឺជាច្បាប់ពេញមួយថ្ងៃ
+              allLeaveRecords.push({
+                date: getTodayDateString(currentLeaveDate),
+                formattedDate: formatDate(currentLeaveDate),
+                checkIn: `${leaveType} (${reason})`,
+                checkOut: `${leaveType} (${reason})`,
+              });
+            }
+          }
+        }
+      } else {
+        // សម្រាប់ច្បាប់ថ្ងៃតែមួយ (e.g., "មួយថ្ងៃ", "មួយព្រឹក")
+        if (startDate >= startMonthDate && startDate <= endMonthDate) {
+          const dateStr = getTodayDateString(startDate);
+          const formatted = formatDate(startDate);
+          const leaveLabel = `ច្បាប់ ${durationStr} (${reason})`;
+
+          if (durationStr === "មួយថ្ងៃ" || durationStr === "មួយយប់") {
+            allLeaveRecords.push({
+              date: dateStr,
+              formattedDate: formatted,
+              checkIn: leaveLabel,
+              checkOut: leaveLabel,
+            });
+          } else if (durationStr === "មួយព្រឹក") {
+            allLeaveRecords.push({
+              date: dateStr,
+              formattedDate: formatted,
+              checkIn: leaveLabel,
+              checkOut: null,
+            });
+          } else if (durationStr === "មួយរសៀល") {
+            allLeaveRecords.push({
+              date: dateStr,
+              formattedDate: formatted,
+              checkIn: null,
+              checkOut: leaveLabel,
+            });
+          }
+        }
+      }
+    });
+  } catch (e) {
+    console.error("Error fetching 'leave_requests' for month", e);
+  }
+
+  // 2. ទាញ 'out_requests' (ច្បាប់ចេញក្រៅ)
+  try {
+    const qOut = query(
+      collection(dbLeave, outCollectionPath),
+      where("userId", "==", employeeId),
+      where("status", "==", "approved")
+    );
+    const outSnapshot = await getDocs(qOut);
+
+    outSnapshot.forEach((doc) => {
+      const data = doc.data();
+      const startDate = parseLeaveDate(data.startDate); // សន្មត់ថាមាន Format "DD-Mon-YYYY"
+      if (!startDate) return;
+
+      if (startDate >= startMonthDate && startDate <= endMonthDate) {
+        const dateStr = getTodayDateString(startDate);
+        const formatted = formatDate(startDate);
+        const leaveType = data.duration || "N/A";
+        const reason = data.reason || "(មិនមានមូលហេតុ)";
+        const leaveLabel = `ច្បាប់ ${leaveType} (${reason})`;
+
+        if (leaveType === "មួយថ្ងៃ") {
+          allLeaveRecords.push({
+            date: dateStr,
+            formattedDate: formatted,
+            checkIn: leaveLabel,
+            checkOut: leaveLabel,
+          });
+        } else if (leaveType === "មួយព្រឹក") {
+          allLeaveRecords.push({
+            date: dateStr,
+            formattedDate: formatted,
+            checkIn: leaveLabel,
+            checkOut: null,
+          });
+        } else if (leaveType === "មួយរសៀល") {
+          allLeaveRecords.push({
+            date: dateStr,
+            formattedDate: formatted,
+            checkIn: null,
+            checkOut: leaveLabel,
+          });
+        }
+      }
+    });
+  } catch (e) {
+    console.error("Error fetching 'out_requests' for month", e);
+  }
+
+  return allLeaveRecords;
+}
+
+// --- *** ថ្មី: Function សម្រាប់បញ្ចូលគ្នានូវទិន្នន័យវត្តមាន និងច្បាប់ *** ---
+function mergeAttendanceAndLeave(attendanceRecords, leaveRecords) {
+  const mergedMap = new Map();
+
+  // 1. បញ្ចូលទិន្នន័យវត្តមាន (Check-in/Out) មុន
+  for (const record of attendanceRecords) {
+    mergedMap.set(record.date, { ...record });
+  }
+
+  // 2. បញ្ចូល ឬ Update ជាមួយទិន្នន័យច្បាប់
+  for (const leave of leaveRecords) {
+    const existing = mergedMap.get(leave.date);
+    if (existing) {
+      // ប្រសិនបើមានទិន្នន័យវត្តមាន, យើងគ្រាន់តែបំពេញកន្លែងទំនេរ
+      if (leave.checkIn && !existing.checkIn) {
+        existing.checkIn = leave.checkIn;
+      }
+      if (leave.checkOut && !existing.checkOut) {
+        existing.checkOut = leave.checkOut;
+      }
+    } else {
+      // ប្រសិនបើមិនមានទិន្នន័យវត្តមានទាល់តែសោះ, បញ្ចូលទិន្នន័យច្បាប់ថ្មី
+      mergedMap.set(leave.date, { ...leave });
+    }
+  }
+
+  return Array.from(mergedMap.values());
+}
+
 // --- AI & Camera Functions ---
 
 // --- *** ថ្មី: ជំនួស Function ទាំងមូល (ត្រឡប់ទៅប្រើ loadFromUri) *** ---
@@ -990,20 +1176,20 @@ function renderEmployeeList(employees) {
     card.className =
       "flex items-center p-3 rounded-xl cursor-pointer hover:bg-blue-50 transition-all shadow-md mb-2 bg-white";
     card.innerHTML = `
-            <img src="${
-              emp.photoUrl ||
-              "https://placehold.co/48x48/e2e8f0/64748b?text=No+Img"
-            }" 
-                 alt="រូបថត" 
-                 class="w-12 h-12 rounded-full object-cover border-2 border-gray-100 mr-3"
-                 onerror="this.src='https://placehold.co/48x48/e2e8f0/64748b?text=Error'">
-            <div>
-                <h3 class="text-md font-semibold text-gray-800">${emp.name}</h3>
-                <p class="text-sm text-gray-500">ID: ${emp.id} | ក្រុម: ${
+              <img src="${
+                emp.photoUrl ||
+                "https://placehold.co/48x48/e2e8f0/64748b?text=No+Img"
+              }" 
+                  alt="រូបថត" 
+                  class="w-12 h-12 rounded-full object-cover border-2 border-gray-100 mr-3"
+                  onerror="this.src='https://placehold.co/48x48/e2e8f0/64748b?text=Error'">
+              <div>
+                  <h3 class="text-md font-semibold text-gray-800">${emp.name}</h3>
+                  <p class="text-sm text-gray-500">ID: ${emp.id} | ក្រុម: ${
       emp.group
     }</p>
-            </div>
-        `;
+              </div>
+          `;
     card.onmousedown = () => selectUser(emp);
     employeeListContainer.appendChild(card);
   });
@@ -1173,6 +1359,7 @@ function forceLogout(message) {
   customModal.classList.add("modal-visible");
 }
 
+// --- *** កែប្រែ: Function នេះត្រូវបានជំនួសទាំងស្រុង *** ---
 function setupAttendanceListener() {
   if (!attendanceCollectionRef) return;
 
@@ -1186,9 +1373,10 @@ function setupAttendanceListener() {
   attendanceStatus.className =
     "text-center text-sm text-gray-500 pb-4 px-6 h-5 animate-pulse";
 
+  // *** កែប្រែ ***: ប្តូរទៅជា async (querySnapshot)
   attendanceListener = onSnapshot(
     attendanceCollectionRef,
-    (querySnapshot) => {
+    async (querySnapshot) => {
       let allRecords = [];
       querySnapshot.forEach((doc) => {
         allRecords.push(doc.data());
@@ -1196,8 +1384,18 @@ function setupAttendanceListener() {
 
       const { startOfMonth, endOfMonth } = getCurrentMonthRange();
 
-      currentMonthRecords = allRecords.filter(
+      // *** កែប្រែ ***: 1. យកទិន្នន័យវត្តមាន (Attendance)
+      const attendanceThisMonth = allRecords.filter(
         (record) => record.date >= startOfMonth && record.date <= endOfMonth
+      );
+
+      // *** កែប្រែ ***: 2. យកទិន្នន័យច្បាប់ (Leave)
+      const leaveThisMonth = await fetchAllLeaveForMonth(currentUser.id);
+
+      // *** កែប្រែ ***: 3. បញ្ចូលទិន្នន័យទាំងពីរចូលគ្នា
+      currentMonthRecords = mergeAttendanceAndLeave(
+        attendanceThisMonth,
+        leaveThisMonth
       );
 
       const todayString = getTodayDateString();
@@ -1218,7 +1416,7 @@ function setupAttendanceListener() {
       });
 
       console.log(
-        `Attendance data updated: ${currentMonthRecords.length} records this month (Sorted).`
+        `Attendance data updated: ${currentMonthRecords.length} records this month (Merged).`
       );
 
       renderTodayHistory();
@@ -1283,10 +1481,10 @@ function renderMonthlyHistory() {
     const row = document.createElement("tr");
     row.className = "hover:bg-gray-50";
     row.innerHTML = `
-            <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${formattedDate}</td>
-            <td class="px-4 py-3 whitespace-nowrap text-sm">${checkInDisplay}</td>
-            <td class="px-4 py-3 whitespace-nowrap text-sm">${checkOutDisplay}</td>
-        `;
+              <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${formattedDate}</td>
+              <td class="px-4 py-3 whitespace-nowrap text-sm">${checkInDisplay}</td>
+              <td class="px-4 py-3 whitespace-nowrap text-sm">${checkOutDisplay}</td>
+          `;
     monthlyHistoryTableBody.appendChild(row);
   });
 }
