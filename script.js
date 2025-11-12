@@ -1655,7 +1655,7 @@ function updateButtonState() {
         !todayData.checkIn.includes("AM") &&
         !todayData.checkIn.includes("PM")
       ) {
-        attendanceStatus.textContent = `ថ្ងៃនេះអ្នកមាន៖ ${todayData.checkIn}`;
+        attendanceStatus.textContent = `ថ្ងៃនេះអ្នកមានច្បាប់៖ ${todayData.checkIn}`;
         attendanceStatus.className =
           "text-center text-sm text-blue-700 pb-4 px-6 h-5";
         checkOutButton.disabled = true; // *** ត្រូវបិទ Check-out បើ Check-in ជាច្បាប់
