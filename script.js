@@ -21,11 +21,15 @@ import {
 // --- Global Variables ---
 let dbAttendance, dbLeave, authAttendance;
 let allEmployees = [];
-let currentMonthRecords = [];
+let currentMonthRecords = []; // ឥឡូវនេះជាលទ្ធផលចុងក្រោយ (Merged)
+let attendanceRecords = []; // *** ថ្មី: សម្រាប់តែទិន្នន័យ Attendance
+let leaveRecords = []; // *** ថ្មី: សម្រាប់តែទិន្នន័យ Leave
 let currentUser = null;
 let currentUserShift = null;
 let attendanceCollectionRef = null;
 let attendanceListener = null;
+let leaveCollectionListener = null; // *** ថ្មី: Listener សម្រាប់ leave_requests
+let outCollectionListener = null; // *** ថ្មី: Listener សម្រាប់ out_requests
 let currentConfirmCallback = null;
 
 // --- ថ្មី: អថេរសម្រាប់គ្រប់គ្រង Session (Device Lock) ---
@@ -422,7 +426,7 @@ function isInsideArea(lat, lon) {
   return isInside;
 }
 
-// --- *** ថ្មី: Function សម្រាប់ទាញទិន្នន័យច្បាប់ (Leave) ទាំងអស់ក្នុងខែ *** ---
+// --- Function សម្រាប់ទាញទិន្នន័យច្បាប់ (Leave) ទាំងអស់ក្នុងខែ ---
 async function fetchAllLeaveForMonth(employeeId) {
   if (!dbLeave) return []; // ត្រឡប់អារេទទេ ប្រសិនបើ dbLeave មិនទាន់រួចរាល់
 
@@ -579,7 +583,7 @@ async function fetchAllLeaveForMonth(employeeId) {
   return allLeaveRecords;
 }
 
-// --- *** ថ្មី: Function សម្រាប់បញ្ចូលគ្នានូវទិន្នន័យវត្តមាន និងច្បាប់ *** ---
+// --- Function សម្រាប់បញ្ចូលគ្នានូវទិន្នន័យវត្តមាន និងច្បាប់ ---
 function mergeAttendanceAndLeave(attendanceRecords, leaveRecords) {
   const mergedMap = new Map();
 
@@ -608,16 +612,45 @@ function mergeAttendanceAndLeave(attendanceRecords, leaveRecords) {
   return Array.from(mergedMap.values());
 }
 
+// --- *** ថ្មី: Function សម្រាប់ merge និង render UI *** ---
+function mergeAndRenderHistory() {
+  // 1. Merge the two global arrays
+  currentMonthRecords = mergeAttendanceAndLeave(attendanceRecords, leaveRecords);
+
+  // 2. Sort
+  const todayString = getTodayDateString();
+  currentMonthRecords.sort((a, b) => {
+    const aDate = a.date || "";
+    const bDate = b.date || "";
+    const isAToday = aDate === todayString;
+    const isBToday = bDate === todayString;
+
+    if (isAToday && !isBToday) {
+      return -1;
+    } else if (!isAToday && isBToday) {
+      return 1;
+    } else {
+      return bDate.localeCompare(aDate);
+    }
+  });
+
+  console.log(
+    `History Rendered: ${currentMonthRecords.length} records (Merged).`
+  );
+
+  // 3. Render
+  renderTodayHistory();
+  renderMonthlyHistory();
+  updateButtonState();
+}
+
 // --- AI & Camera Functions ---
 
-// --- *** ថ្មី: ជំនួស Function ទាំងមូល (ត្រឡប់ទៅប្រើ loadFromUri) *** ---
 async function loadAIModels() {
   const MODEL_URL = "./models";
   loadingText.textContent = "កំពុងទាញយក AI Models...";
 
   try {
-    // --- ថ្មី: បើកដំណើរការ Disk Cache របស់ face-api.js ---
-    // វានឹងរក្សាទុកក្នុង Cache របស់ Browser ដោយស្វ័យប្រវត្តិ
     await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL, {
       useDiskCache: true,
     });
@@ -633,7 +666,6 @@ async function loadAIModels() {
     await fetchGoogleSheetData();
   } catch (e) {
     console.error("Error loading AI models", e);
-    // Error នេះ ភាគច្រើនមកពីរកឯកសារមិនឃើញ (404)
     showMessage(
       "បញ្ហាធ្ងន់ធ្ងរ",
       `មិនអាចទាញយក AI Models បានទេ។ សូមពិនិត្យ Folder 'models' (m តូច)។ Error: ${e.message}`,
@@ -641,7 +673,6 @@ async function loadAIModels() {
     );
   }
 }
-// --- ********************************************************** ---
 
 async function prepareFaceMatcher(imageUrl) {
   currentUserFaceMatcher = null;
@@ -1257,6 +1288,7 @@ async function selectUser(employee) {
   changeView("homeView");
 
   setupAttendanceListener();
+  startLeaveListeners(); // <-- *** ថ្មី: បន្ថែមការហៅ Function នេះ ***
   startSessionListener(employee.id);
 
   prepareFaceMatcher(employee.photoUrl);
@@ -1284,8 +1316,21 @@ function logout() {
     sessionListener = null;
   }
 
+  // --- *** ថ្មី: បញ្ឈប់ Listeners សម្រាប់ច្បាប់ *** ---
+  if (leaveCollectionListener) {
+    leaveCollectionListener();
+    leaveCollectionListener = null;
+  }
+  if (outCollectionListener) {
+    outCollectionListener();
+    outCollectionListener = null;
+  }
+  // --- ************************************* ---
+
   attendanceCollectionRef = null;
   currentMonthRecords = [];
+  attendanceRecords = []; // <-- *** ថ្មី: Reset ***
+  leaveRecords = []; // <-- *** ថ្មី: Reset ***
 
   historyTableBody.innerHTML = "";
   if (noHistoryRow) {
@@ -1359,12 +1404,73 @@ function forceLogout(message) {
   customModal.classList.add("modal-visible");
 }
 
-// --- *** កែប្រែ: Function នេះត្រូវបានជំនួសទាំងស្រុង *** ---
+// --- *** ថ្មី: Function សម្រាប់ស្តាប់ទិន្នន័យច្បាប់ (Leave) *** ---
+function startLeaveListeners() {
+  if (!dbLeave || !currentUser) return;
+
+  if (leaveCollectionListener) leaveCollectionListener();
+  if (outCollectionListener) outCollectionListener();
+
+  const leaveCollectionPath =
+    "/artifacts/default-app-id/public/data/leave_requests";
+  const outCollectionPath =
+    "/artifacts/default-app-id/public/data/out_requests";
+
+  const employeeId = currentUser.id;
+
+  const reFetchAllLeave = async () => {
+    // 1. Re-fetch ALL leave data
+    leaveRecords = await fetchAllLeaveForMonth(employeeId);
+    console.log(`Real-time Leave Updated: ${leaveRecords.length} records.`);
+    // 2. Call merge and render
+    mergeAndRenderHistory();
+  };
+
+  // Listener 1: For 'leave_requests'
+  const qLeave = query(
+    collection(dbLeave, leaveCollectionPath),
+    where("userId", "==", employeeId)
+  );
+  leaveCollectionListener = onSnapshot(
+    qLeave,
+    (snapshot) => {
+      console.log("Real-time update from 'leave_requests' detected.");
+      reFetchAllLeave();
+    },
+    (error) => {
+      console.error("Error listening to 'leave_requests':", error);
+      showMessage(
+        "បញ្ហា",
+        "មិនអាចស្តាប់ទិន្នន័យច្បាប់ (Leave) បានទេ។",
+        true
+      );
+    }
+  );
+
+  // Listener 2: For 'out_requests'
+  const qOut = query(
+    collection(dbLeave, outCollectionPath),
+    where("userId", "==", employeeId)
+  );
+  outCollectionListener = onSnapshot(
+    qOut,
+    (snapshot) => {
+      console.log("Real-time update from 'out_requests' detected.");
+      reFetchAllLeave();
+    },
+    (error) => {
+      console.error("Error listening to 'out_requests':", error);
+      showMessage("បញ្ហា", "មិនអាចស្តាប់ទិន្នន័យច្បាប់ (Out) បានទេ។", true);
+    }
+  );
+}
+
+// --- *** កែប្រែ: Function នេះឥឡូវស្តាប់តែ Attendance ប៉ុណ្ណោះ *** ---
 function setupAttendanceListener() {
   if (!attendanceCollectionRef) return;
 
   if (attendanceListener) {
-    attendanceListener();
+    attendanceListener(); // Stop old listener
   }
 
   checkInButton.disabled = true;
@@ -1373,10 +1479,9 @@ function setupAttendanceListener() {
   attendanceStatus.className =
     "text-center text-sm text-gray-500 pb-4 px-6 h-5 animate-pulse";
 
-  // *** កែប្រែ ***: ប្តូរទៅជា async (querySnapshot)
   attendanceListener = onSnapshot(
     attendanceCollectionRef,
-    async (querySnapshot) => {
+    (querySnapshot) => {
       let allRecords = [];
       querySnapshot.forEach((doc) => {
         allRecords.push(doc.data());
@@ -1384,44 +1489,17 @@ function setupAttendanceListener() {
 
       const { startOfMonth, endOfMonth } = getCurrentMonthRange();
 
-      // *** កែប្រែ ***: 1. យកទិន្នន័យវត្តមាន (Attendance)
-      const attendanceThisMonth = allRecords.filter(
+      // 1. Update the global attendanceRecords
+      attendanceRecords = allRecords.filter(
         (record) => record.date >= startOfMonth && record.date <= endOfMonth
       );
 
-      // *** កែប្រែ ***: 2. យកទិន្នន័យច្បាប់ (Leave)
-      const leaveThisMonth = await fetchAllLeaveForMonth(currentUser.id);
-
-      // *** កែប្រែ ***: 3. បញ្ចូលទិន្នន័យទាំងពីរចូលគ្នា
-      currentMonthRecords = mergeAttendanceAndLeave(
-        attendanceThisMonth,
-        leaveThisMonth
-      );
-
-      const todayString = getTodayDateString();
-
-      currentMonthRecords.sort((a, b) => {
-        const aDate = a.date || "";
-        const bDate = b.date || "";
-        const isAToday = aDate === todayString;
-        const isBToday = bDate === todayString;
-
-        if (isAToday && !isBToday) {
-          return -1;
-        } else if (!isAToday && isBToday) {
-          return 1;
-        } else {
-          return bDate.localeCompare(aDate);
-        }
-      });
-
       console.log(
-        `Attendance data updated: ${currentMonthRecords.length} records this month (Merged).`
+        `Real-time Attendance Updated: ${attendanceRecords.length} records.`
       );
 
-      renderTodayHistory();
-      renderMonthlyHistory();
-      updateButtonState();
+      // 2. Call the merge and render function
+      mergeAndRenderHistory();
     },
     (error) => {
       console.error("Error listening to attendance:", error);
@@ -1580,7 +1658,7 @@ function updateButtonState() {
         attendanceStatus.textContent = `ថ្ងៃនេះអ្នកមាន៖ ${todayData.checkIn}`;
         attendanceStatus.className =
           "text-center text-sm text-blue-700 pb-4 px-6 h-5";
-        checkOutButton.disabled = true;
+        checkOutButton.disabled = true; // *** ត្រូវបិទ Check-out បើ Check-in ជាច្បាប់
       } else {
         attendanceStatus.textContent = `បាន Check-in ម៉ោង: ${todayData.checkIn}`;
         attendanceStatus.className =
@@ -1603,6 +1681,7 @@ function updateButtonState() {
         attendanceStatus.textContent = `ថ្ងៃនេះអ្នកមាន៖ ${todayData.checkOut}`;
         attendanceStatus.className =
           "text-center text-sm text-blue-700 pb-4 px-6 h-5";
+        checkInButton.disabled = true; // *** ត្រូវបិទ Check-in បើ Check-out ជាច្បាប់
       } else {
         attendanceStatus.textContent = `បាន Check-out ម៉ោង: ${todayData.checkOut}`;
         attendanceStatus.className =
