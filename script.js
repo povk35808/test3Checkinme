@@ -1533,36 +1533,58 @@ function renderMonthlyHistory() {
     let checkInDisplay;
     if (record.checkIn) {
       if (record.checkIn.includes("AM") || record.checkIn.includes("PM")) {
-        checkInDisplay = `<span class="text-green-600 font-semibold">${record.checkIn}</span>`;
+        // It's a time
+        checkInDisplay = `<span class="font-semibold text-green-600">ចូល: ${record.checkIn}</span>`;
       } else {
-        checkInDisplay = `<span class="text-blue-600 font-semibold">${record.checkIn}</span>`;
+        // It's a leave reason
+        checkInDisplay = `<span class="font-semibold text-blue-600">${record.checkIn}</span>`;
       }
     } else {
+      // No check-in data
       checkInDisplay = isToday
-        ? "---"
-        : '<span class="text-red-500 font-semibold">អវត្តមាន</span>';
+        ? `<span class="text-gray-400">ចូល: ---</span>`
+        : `<span class="font-semibold text-red-500">ចូល: អវត្តមាន</span>`;
     }
 
     let checkOutDisplay;
     if (record.checkOut) {
       if (record.checkOut.includes("AM") || record.checkOut.includes("PM")) {
-        checkOutDisplay = `<span class="text-red-600 font-semibold">${record.checkOut}</span>`;
+        // It's a time
+        checkOutDisplay = `<span class="font-semibold text-red-600">ចេញ: ${record.checkOut}</span>`;
       } else {
-        checkOutDisplay = `<span class="text-blue-600 font-semibold">${record.checkOut}</span>`;
+        // It's a leave reason
+        checkOutDisplay = `<span class="font-semibold text-blue-600">${record.checkOut}</span>`;
       }
     } else {
+      // No check-out data
       checkOutDisplay = isToday
-        ? '<span class="text-gray-400">មិនទាន់ចេញ</span>'
-        : '<span class="text-red-500 font-semibold">អវត្តមាន</span>';
+        ? `<span class="text-gray-400">ចេញ: មិនទាន់ចេញ</span>`
+        : `<span class="font-semibold text-red-500">ចេញ: អវត្តមាន</span>`;
+    }
+
+    // --- ថ្មី: សម្រាប់ករណីច្បាប់ពេញមួយថ្ងៃ (Check-in និង Check-out ជាអក្សរដូចគ្នា) ---
+    if (
+      record.checkIn &&
+      record.checkOut &&
+      record.checkIn === record.checkOut
+    ) {
+      // នេះគឺជាច្បាប់ពេញមួយថ្ងៃ, បង្ហាញតែមួយជួរ
+      checkInDisplay = `<span class="font-semibold text-blue-600">${record.checkIn}</span>`;
+      checkOutDisplay = ""; // កុំបង្ហាញជួរទីពីរ
     }
 
     const row = document.createElement("tr");
-    row.className = "hover:bg-gray-50";
+    // --- ថ្មី: បន្ថែម border-b (បន្ទាត់ខាងក្រោម) សម្រាប់បែងចែក ---
+    row.className = "hover:bg-gray-50 border-b border-gray-100";
     row.innerHTML = `
-              <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${formattedDate}</td>
-              <td class="px-4 py-3 whitespace-nowrap text-sm">${checkInDisplay}</td>
-              <td class="px-4 py-3 whitespace-nowrap text-sm">${checkOutDisplay}</td>
-          `;
+        <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-800 align-top">${formattedDate}</td>
+        <td class="px-4 py-3 text-sm">
+          <div class="flex flex-col space-y-1">
+            ${checkInDisplay}
+            ${checkOutDisplay}
+          </div>
+        </td>
+    `;
     monthlyHistoryTableBody.appendChild(row);
   });
 }
@@ -1592,12 +1614,12 @@ function renderTodayHistory() {
       todayRecord.checkIn.includes("AM") ||
       todayRecord.checkIn.includes("PM")
     ) {
-      checkInDisplay = `<span class="text-green-600 font-semibold">${todayRecord.checkIn}</span>`;
+      checkInDisplay = `<span class="font-semibold text-green-600">ចូល: ${todayRecord.checkIn}</span>`;
     } else {
-      checkInDisplay = `<span class="text-blue-600 font-semibold">${todayRecord.checkIn}</span>`;
+      checkInDisplay = `<span class="font-semibold text-blue-600">${todayRecord.checkIn}</span>`;
     }
   } else {
-    checkInDisplay = "---";
+    checkInDisplay = `<span class="text-gray-400">ចូល: ---</span>`;
   }
 
   let checkOutDisplay;
@@ -1606,21 +1628,36 @@ function renderTodayHistory() {
       todayRecord.checkOut.includes("AM") ||
       todayRecord.checkOut.includes("PM")
     ) {
-      checkOutDisplay = `<span class="text-red-600 font-semibold">${todayRecord.checkOut}</span>`;
+      checkOutDisplay = `<span class="font-semibold text-red-600">ចេញ: ${todayRecord.checkOut}</span>`;
     } else {
-      checkOutDisplay = `<span class="text-blue-600 font-semibold">${todayRecord.checkOut}</span>`;
+      checkOutDisplay = `<span class="font-semibold text-blue-600">${todayRecord.checkOut}</span>`;
     }
   } else {
-    checkOutDisplay = '<span class="text-gray-400">មិនទាន់ចេញ</span>';
+    checkOutDisplay = `<span class="text-gray-400">ចេញ: មិនទាន់ចេញ</span>`;
+  }
+
+  // --- ថ្មី: សម្រាប់ករណីច្បាប់ពេញមួយថ្ងៃ (Check-in និង Check-out ជាអក្សរដូចគ្នា) ---
+  if (
+    todayRecord.checkIn &&
+    todayRecord.checkOut &&
+    todayRecord.checkIn === todayRecord.checkOut
+  ) {
+    // នេះគឺជាច្បាប់ពេញមួយថ្ងៃ, បង្ហាញតែមួយជួរ
+    checkInDisplay = `<span class="font-semibold text-blue-600">${todayRecord.checkIn}</span>`;
+    checkOutDisplay = ""; // កុំបង្ហាញជួរទីពីរ
   }
 
   const row = document.createElement("tr");
   row.className = "hover:bg-gray-50";
   row.innerHTML = `
-        <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${formattedDate}</td>
-        <td class="px-4 py-3 whitespace-nowrap text-sm">${checkInDisplay}</td>
-        <td class="px-4 py-3 whitespace-nowrap text-sm">${checkOutDisplay}</td>
-    `;
+      <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-800 align-top">${formattedDate}</td>
+      <td class="px-4 py-3 text-sm">
+        <div class="flex flex-col space-y-1">
+          ${checkInDisplay}
+          ${checkOutDisplay}
+        </div>
+      </td>
+  `;
   historyTableBody.appendChild(row);
 }
 
